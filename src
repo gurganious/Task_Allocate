@@ -1,0 +1,120 @@
+def overlap(x, y):
+    '''
+        Checks if two time segments overlap
+    '''
+    a, b = x
+    c, d = y
+    return a <= d and b >= c
+
+def allocate(data, ans = None):
+    '''
+         Intervention schedule allocation based upon backtracking
+    '''
+    if ans is None:
+        ans = {}
+    
+    if len(ans) == len(data["Interventions"]):
+        # handled all the interventions
+        yield ans
+        
+    # Check next intervention
+    for intervention_name, intervention in data["Interventions"].items():
+        if intervention_name not in ans:
+            # will add items not in ans
+            # last day intervention can be run
+            last_day = min(data["T"], int(intervention["tmax"]))  
+            
+            for day in range(1, last_day+1):
+                str_day = str(day)
+                
+                # different days intervention could be run
+                delta = intervention["Delta"][day-1]  # number of days it takes to run
+                
+                if day + delta <= last_day + 1: 
+                    # must finish within last day
+                    # Check that there are sufficient resources
+                    
+                    
+                    if ans:
+                        # Get resources used so far by current answer
+                        resources_usage = ans["__Resource_Usage"]
+                    else:
+                         # Init resources for current answer
+                        resources_usage =  {}
+                        
+                        for i in range(len(data["Resources"])):
+                            resources_usage["Resources_"+str(i)] = [0]*data["T"]                        
+
+                    missing_resources = False
+                    for index, (resource_name, v) in enumerate(intervention["workload"].items()):
+                        if not str_day in v:
+                            missing_resources = True
+                            break
+                        usage_key = "Resources_"+str(index) #(resource_name, day)  # pair: (resource name, day) as key
+                        resources_usage[usage_key][day] += v[str_day][str_day]
+                        
+                    if missing_resources:
+                        continue # one resource has no resources for a day
+                    
+                    # Check resource less than max
+                    resources = data["Resources"]
+                    resource_keys = list(resources)
+                    for usage_key, value in resources_usage.items():
+                        index = int(usage_key.split("_")[1]) # usageKey of the form "Resources_" + str(index)
+                        
+                        resource_name = resource_keys[index]
+                        if value[day] > resources[resource_name]["max"][day-1]: # max value for resoure for this day
+                            break
+                    else:
+                        # Resource didn't exceed max
+                        # Check on Exclusion
+                        winter = data["Seasons"]['winter']
+                        summer = data["Seasons"]['summer']
+                        isa = data["Seasons"]['is']
+                        if str_day in winter:
+                            season = "winter"
+                        elif str_day in summer:
+                            season = "summer"
+                        elif str_day in isa:
+                            season = "is"
+                        else:
+                            season = ""
+                            
+                        exclusions = data["Exclusions"]
+                        bExclude = False
+                        for k, v_lst in exclusions.items():
+                            if season in v_lst and intervention_name in v_lst:
+                                for intervention_k, ans_response in ans.items():
+                                    if intervention_k in v_lst:
+                                        ans_day = ans_response["Day"]
+                                        ans_delta = ans_response["Delta"]
+                                        if overlap([day, day+delta-1], [ans_day, ans_day+ans_delta-1]):
+                                            bExclude = True
+                                            break
+                                if bExclude:
+                                    break
+                        if not bExclude:
+                            # Resources used
+                            response = {"Day": day, "Delta": intervention["Delta"][day-1]}
+                            #resources = {k:v[str_day][str_day] for k, v in intervention["workload"].items()}
+                            #response['Resources'] = resources
+                            ans["__Resource_Usage"] = resources_usage
+                            ans[intervention_name] = response
+                            
+                            yield from allocate(data, ans)
+                            
+                            # Remove last entry so we can try next iteration
+                            del ans[intervention_name]   
+
+                           
+# Loading data from local file
+with open('resource_allocation/example1.json', 'r') as f:
+    data = json.load(f)                          
+       
+# Get first solution using from allocate generator                 
+answer = next(allocate(data), None)   
+if answer:
+    for name, intervention in answer.items():
+        if name != "__Resource_Usage":
+            print(name, intervention['Day'])
+       
